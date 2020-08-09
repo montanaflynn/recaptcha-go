@@ -281,7 +281,7 @@ func (s *ReCaptchaSuite) TestVerifyWithHostnameOption(c *C) {
 	c.Check(ok, Equals, true)
 	c.Check(recaptchaErr.RequestError, Equals, false)
 	c.Check(err, ErrorMatches, "invalid response hostname 'test2.com', while expecting 'test.com'")
-
+	c.Assert(recaptchaErr.ResponseBody, FitsTypeOf, string(""))
 }
 
 type mockClockWithinRespenseTime struct{}

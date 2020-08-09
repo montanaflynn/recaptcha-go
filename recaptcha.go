@@ -17,7 +17,7 @@ type VERSION int8
 const (
 	// V2 recaptcha api v2
 	V2 VERSION = iota
-	// V3 recaptcha api v3, more details can be found here : https://developers.google.com/recaptcha/docs/v3
+	// V3 recaptcha api v3, more details can be found here: https://developers.google.com/recaptcha/docs/v3
 	V3
 	// DefaultThreshold Default minimin score when using V3 api
 	DefaultThreshold float32 = 0.5
@@ -73,12 +73,15 @@ type Error struct {
 	ErrorCodes []string
 	// RequestError is true if the verify request to recaptcha failed.
 	RequestError bool
+	// ResponseBody holds the raw response body from recaptcha.
+	ResponseBody string
 }
 
 func (e *Error) Error() string { return e.msg }
 
-// NewReCAPTCHA new ReCAPTCHA instance if version is set to V2 uses recatpcha v2 API, get your secret from https://www.google.com/recaptcha/admin
-//  if version is set to V2 uses recatpcha v2 API, get your secret from https://g.co/recaptcha/v3
+// NewReCAPTCHA new ReCAPTCHA instance if version is set to V2 uses recatpcha v2 API
+// get your secret from https://www.google.com/recaptcha/admin if version is set to V2
+// uses recatpcha v2 API, get your secret from https://g.co/recaptcha/v3
 func NewReCAPTCHA(ReCAPTCHASecret string, version VERSION, timeout time.Duration) (ReCAPTCHA, error) {
 	if ReCAPTCHASecret == "" {
 		return ReCAPTCHA{}, fmt.Errorf("recaptcha secret cannot be blank")
@@ -133,61 +136,99 @@ func (r *ReCAPTCHA) confirm(recaptcha reCHAPTCHARequest, options VerifyOption) (
 	}
 	response, err := r.client.PostForm(r.ReCAPTCHALink, formValues)
 	if err != nil {
-		Err = &Error{msg: fmt.Sprintf("error posting to recaptcha endpoint: '%s'", err), RequestError: true}
+		Err = &Error{
+			msg:          fmt.Sprintf("error posting to recaptcha endpoint: '%s'", err),
+			RequestError: true,
+		}
 		return
 	}
 	defer response.Body.Close()
 	resultBody, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		Err = &Error{msg: fmt.Sprintf("couldn't read response body: '%s'", err), RequestError: true}
+		Err = &Error{
+			msg:          fmt.Sprintf("couldn't read response body: '%s'", err),
+			RequestError: true,
+		}
 		return
 	}
 	var result reCHAPTCHAResponse
 	err = json.Unmarshal(resultBody, &result)
 	if err != nil {
-		Err = &Error{msg: fmt.Sprintf("invalid response body json: '%s'", err), RequestError: true}
+		Err = &Error{
+			msg:          fmt.Sprintf("invalid response body json: '%s'", err),
+			RequestError: true,
+			ResponseBody: string(resultBody),
+		}
 		return
 	}
 
 	if options.Hostname != "" && options.Hostname != result.Hostname {
-		Err = &Error{msg: fmt.Sprintf("invalid response hostname '%s', while expecting '%s'", result.Hostname, options.Hostname)}
+		Err = &Error{
+			msg:          fmt.Sprintf("invalid response hostname '%s', while expecting '%s'", result.Hostname, options.Hostname),
+			ResponseBody: string(resultBody),
+		}
 		return
 	}
 
 	if options.ApkPackageName != "" && options.ApkPackageName != result.ApkPackageName {
-		Err = &Error{msg: fmt.Sprintf("invalid response ApkPackageName '%s', while expecting '%s'", result.ApkPackageName, options.ApkPackageName)}
+		Err = &Error{
+			msg:          fmt.Sprintf("invalid response ApkPackageName '%s', while expecting '%s'", result.ApkPackageName, options.ApkPackageName),
+			ResponseBody: string(resultBody),
+		}
 		return
 	}
 
 	if options.ResponseTime != 0 {
 		duration := r.horloge.Since(result.ChallengeTS)
 		if options.ResponseTime < duration {
-			Err = &Error{msg: fmt.Sprintf("time spent in resolving challenge '%fs', while expecting maximum '%fs'", duration.Seconds(), options.ResponseTime.Seconds())}
+			msg := fmt.Sprintf("time spent in resolving challenge '%fs', while expecting maximum '%fs'", duration.Seconds(), options.ResponseTime.Seconds())
+			Err = &Error{
+				msg:          msg,
+				ResponseBody: string(resultBody),
+			}
 			return
 		}
 	}
 	if r.Version == V3 {
 		if options.Action != "" && options.Action != result.Action {
-			Err = &Error{msg: fmt.Sprintf("invalid response action '%s', while expecting '%s'", result.Action, options.Action)}
+			Err = &Error{
+				msg:          fmt.Sprintf("invalid response action '%s', while expecting '%s'", result.Action, options.Action),
+				ResponseBody: string(resultBody),
+			}
 			return
 		}
 		if options.Threshold != 0 && options.Threshold > result.Score {
-			Err = &Error{msg: fmt.Sprintf("received score '%f', while expecting minimum '%f'", result.Score, options.Threshold)}
+			Err = &Error{
+				msg:          fmt.Sprintf("received score '%f', while expecting minimum '%f'", result.Score, options.Threshold),
+				ResponseBody: string(resultBody),
+			}
 			return
 		}
 		if options.Threshold == 0 && DefaultThreshold > result.Score {
-			Err = &Error{msg: fmt.Sprintf("received score '%f', while expecting minimum '%f'", result.Score, DefaultThreshold)}
+			Err = &Error{
+				msg:          fmt.Sprintf("received score '%f', while expecting minimum '%f'", result.Score, DefaultThreshold),
+				ResponseBody: string(resultBody),
+			}
 			return
 		}
 	}
 	if result.ErrorCodes != nil {
-		Err = &Error{msg: fmt.Sprintf("remote error codes: %v", result.ErrorCodes), ErrorCodes: result.ErrorCodes}
+		Err = &Error{
+			msg: fmt.Sprintf("remote error codes: %v", result.ErrorCodes), ErrorCodes: result.ErrorCodes,
+			ResponseBody: string(resultBody),
+		}
 		return
 	}
 	if !result.Success && recaptcha.RemoteIP != "" {
-		Err = &Error{msg: fmt.Sprintf("invalid challenge solution or remote IP")}
+		Err = &Error{
+			msg:          fmt.Sprintf("invalid challenge solution or remote IP"),
+			ResponseBody: string(resultBody),
+		}
 	} else if !result.Success {
-		Err = &Error{msg: fmt.Sprintf("invalid challenge solution")}
+		Err = &Error{
+			msg:          fmt.Sprintf("invalid challenge solution"),
+			ResponseBody: string(resultBody),
+		}
 	}
 	return
 }
